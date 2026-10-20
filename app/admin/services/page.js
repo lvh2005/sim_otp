@@ -1,42 +1,37 @@
 "use client";
 
-import { useState } from "react";
-
-const services = [
-	["otissim_v1", "OtisSim v1", "No-check"],
-	["otissim_v2", "OtisSim v2", ""],
-	["otissim_v3", "OtisSim v3", ""],
-	["otissim_v4", "OtisSim v4", ""],
-	["otissim_v5", "OtisSim v5", "No-check"],
-	["otissim_v6", "OtisSim v6", ""],
-];
-
-const currency = new Intl.NumberFormat("vi-VN");
+import { useCallback, useEffect, useState } from "react";
+import { SIM_SERVICE_CATALOG } from "@/lib/sim-catalog";
+import { useAdmin } from "../admin-shell";
+import { AdminNotice, money, PageHeading } from "../admin-ui";
 
 export default function AdminServicesPage() {
-	const [adminToken, setAdminToken] = useState("");
+	const { request } = useAdmin();
 	const [prices, setPrices] = useState({});
-	const [connected, setConnected] = useState(false);
+	const [disabledServices, setDisabledServices] = useState([]);
 	const [busy, setBusy] = useState(false);
-	const [message, setMessage] = useState("");
 	const [error, setError] = useState("");
+	const [message, setMessage] = useState("");
 
-	async function connect(event) {
-		event.preventDefault();
-		setBusy(true);
+	const loadPrices = useCallback(async () => {
 		setError("");
-		setMessage("");
 		try {
-			const response = await fetch("/api/admin", { headers: { "X-Admin-Token": adminToken }, cache: "no-store" });
-			const result = await response.json();
-			if (!response.ok) throw new Error(result.error || "Không xác thực được quản trị viên");
-			setPrices(Object.fromEntries(Object.entries(result.prices).map(([service, price]) => [service, String(price || "")])));
-			setConnected(true);
-		} catch (connectError) {
-			setError(connectError.message);
-		} finally {
-			setBusy(false);
+			const result = await request("?view=prices");
+			setPrices(Object.fromEntries(Object.entries(result.prices || {}).map(([service, price]) => [service, String(price || "")])));
+			setDisabledServices(Array.isArray(result.disabledServices) ? result.disabledServices : []);
+		} catch (loadError) {
+			setError(loadError.message);
 		}
+	}, [request]);
+
+	useEffect(() => { loadPrices(); }, [loadPrices]);
+
+	function toggleService(serviceId) {
+		setDisabledServices((current) =>
+			current.includes(serviceId)
+				? current.filter((id) => id !== serviceId)
+				: [...current, serviceId]
+		);
 	}
 
 	async function savePrices(event) {
@@ -45,15 +40,17 @@ export default function AdminServicesPage() {
 		setError("");
 		setMessage("");
 		try {
-			const response = await fetch("/api/admin", {
+			const result = await request("", {
 				method: "PATCH",
-				headers: { "Content-Type": "application/json", "X-Admin-Token": adminToken },
-				body: JSON.stringify({ prices: Object.fromEntries(Object.entries(prices).map(([service, price]) => [service, Number(price)])) }),
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					prices: Object.fromEntries(Object.entries(prices).map(([service, price]) => [service, Number(price)])),
+					disabledServices,
+				}),
 			});
-			const result = await response.json();
-			if (!response.ok) throw new Error(result.error || "Không lưu được bảng giá");
-			setPrices(Object.fromEntries(Object.entries(result.prices).map(([service, price]) => [service, String(price)])));
-			setMessage("Đã lưu bảng giá. Giá mới áp dụng cho các lượt thuê tiếp theo.");
+			setPrices(Object.fromEntries(Object.entries(result.prices || {}).map(([service, price]) => [service, String(price || "")])));
+			setDisabledServices(Array.isArray(result.disabledServices) ? result.disabledServices : []);
+			setMessage("Đã lưu bảng giá và trạng thái bật/tắt dịch vụ thành công.");
 		} catch (saveError) {
 			setError(saveError.message);
 		} finally {
@@ -61,60 +58,75 @@ export default function AdminServicesPage() {
 		}
 	}
 
-	function disconnect() {
-		setAdminToken("");
-		setPrices({});
-		setConnected(false);
-		setMessage("");
-		setError("");
-	}
-
-	return (
-		<main className="page-shell">
-			<header className="topbar">
-				<a className="brand-mark" href="/dashboard">SIM<span>OTP</span></a>
-				<div className="account-tools">
-					<span className="account-name">Quản trị dịch vụ</span>
-					<a className="quiet-button admin-back-link" href="/dashboard">Về dashboard</a>
+	return <>
+		<PageHeading eyebrow="CẤU HÌNH CỬA HÀNG" title="Bảng giá & Bật/Tắt Dịch Vụ" description="Giá bán và bật/tắt dịch vụ áp dụng tức thì trên giao diện người dùng; dịch vụ bị tắt sẽ ẩn khỏi trang thuê." action={<button className="quiet-button" onClick={loadPrices}>Làm mới</button>} />
+		<AdminNotice error={error} message={message} />
+		<form className="admin-panel admin-price-panel glass-panel" onSubmit={savePrices}>
+			<div className="admin-section-heading">
+				<div>
+					<h2>Giá theo dịch vụ & Trạng thái hoạt động</h2>
+					<p>Bật/tắt để cho phép hoặc ẩn dịch vụ khỏi trang người dùng; thiết lập giá bán VND tương ứng.</p>
 				</div>
-			</header>
-
-			<div className="workspace admin-workspace">
-				<section className="page-heading">
-					<div><p className="eyebrow">QUẢN TRỊ · BẢNG GIÁ</p><h1>Giá thuê SIM</h1></div>
-					{connected && <button className="quiet-button" onClick={disconnect}>Khóa trang quản trị</button>}
-				</section>
-
-				{!connected ? (
-					<section className="admin-panel admin-auth-panel">
-						<div className="section-heading"><span className="step-index">A</span><div><h2>Xác thực quản trị</h2><p>Nhập ADMIN_API_TOKEN đã cấu hình trên server.</p></div></div>
-						<form className="admin-auth-form" onSubmit={connect}>
-							<label>Admin API token<input type="password" autoComplete="current-password" value={adminToken} onChange={(event) => setAdminToken(event.target.value)} required /></label>
-							<button className="primary-button" disabled={busy}>{busy ? "Đang kiểm tra..." : "Mở quản lý giá"}</button>
-						</form>
-					</section>
-				) : (
-					<form className="admin-panel" onSubmit={savePrices}>
-						<div className="section-heading"><span className="step-index">01</span><div><h2>Giá bán theo loại SIM</h2><p>Giá user bị trừ khi tạo đơn mới, đơn cũ không đổi.</p></div></div>
-						<div className="price-table" role="table" aria-label="Giá bán SIM">
-							<div className="price-table-head" role="row"><span>Loại SIM</span><span>Giá bán (VND)</span></div>
-							{services.map(([id, label, note]) => (
-								<label className="price-table-row" key={id}>
-									<span className="service-label">{label}{note && <small>{note}</small>}</span>
-									<span className="price-input-wrap"><input type="number" min="1" max="100000000" step="1" inputMode="numeric" value={prices[id] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [id]: event.target.value }))} required /><span>đ</span></span>
-								</label>
-							))}
-						</div>
-						<div className="margin-note"><strong>Thiết lập lợi nhuận</strong><p>Đây là giá bán. Hãy đặt cao hơn giá vốn Otistx và phần lợi nhuận mong muốn. Provider không có API báo giá trước khi thuê, nên cần đối chiếu giá vốn trong tài khoản provider.</p></div>
-						<div className="admin-form-footer">
-							{error && <p className="inline-message error-message" role="alert">{error}</p>}
-							{message && <p className="inline-message success-message" role="status">{message}</p>}
-							<button className="primary-button" disabled={busy}>{busy ? "Đang lưu..." : "Lưu bảng giá"}</button>
-						</div>
-					</form>
-				)}
-				{!connected && error && <p className="admin-alert error-message" role="alert">{error}</p>}
+				<span className="admin-price-count">{SIM_SERVICE_CATALOG.length} dịch vụ ({SIM_SERVICE_CATALOG.length - disabledServices.length} đang bật)</span>
 			</div>
-		</main>
-	);
+			<div className="price-table" role="table" aria-label="Giá bán SIM">
+				<div className="price-table-head" role="row">
+					<span style={{ flex: 1 }}>Dịch vụ</span>
+					<span style={{ width: 140, textAlign: "center" }}>Trạng thái</span>
+					<span style={{ width: 170, textAlign: "right" }}>Giá bán (VND)</span>
+				</div>
+				{SIM_SERVICE_CATALOG.map((service) => {
+					const isDisabled = disabledServices.includes(service.id);
+					return (
+						<div className={`price-table-row ${isDisabled ? "service-row-disabled" : ""}`} key={service.id}>
+							<div className="service-label">
+								<span className="service-name-text">{service.label}</span>
+								<span className="service-mode-tag">{service.mode}</span>
+								{service.category && (
+									<span className="service-mode-tag" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981" }}>
+										{service.category.toUpperCase()}
+									</span>
+								)}
+							</div>
+							<div className="service-toggle-wrap" style={{ width: 140 }}>
+								<button
+									type="button"
+									className={`service-status-toggle ${isDisabled ? "disabled" : "enabled"}`}
+									onClick={() => toggleService(service.id)}
+									title={isDisabled ? "Nhấn để BẬT dịch vụ (Hiển thị lại trên web)" : "Nhấn để TẮT dịch vụ (Ẩn khỏi web người dùng)"}
+								>
+									<span className="toggle-dot" />
+									<span className="toggle-text">{isDisabled ? "Đã tắt (Ẩn)" : "Đang bật"}</span>
+								</button>
+							</div>
+							<div className="price-input-wrap">
+								<input
+									type="number"
+									min="100"
+									max="100000000"
+									step="100"
+									inputMode="numeric"
+									value={prices[service.id] ?? ""}
+									onChange={(event) => setPrices((current) => ({ ...current, [service.id]: event.target.value }))}
+									required
+									className="admin-input-field mono-text"
+								/>
+								<span className="price-currency-suffix">₫</span>
+							</div>
+						</div>
+					);
+				})}
+			</div>
+			<div className="margin-note">
+				<strong>💡 Quản lý hiển thị và biên lợi nhuận</strong>
+				<p>Khi bạn tắt một dịch vụ, dịch vụ đó sẽ lập tức ẩn khỏi trang khách hàng và không thể tạo đơn mới. Hãy nhấn <strong>💾 Lưu bảng giá</strong> để áp dụng các thay đổi.</p>
+			</div>
+			<div className="admin-form-footer">
+				<span className="admin-price-footnote">✓ Đã đồng bộ cấu hình Redis phân tán.</span>
+				<button className="primary-button admin-save-price-btn" disabled={busy}>
+					{busy ? "Đang lưu..." : "💾 Lưu bảng giá & Trạng thái"}
+				</button>
+			</div>
+		</form>
+	</>;
 }
