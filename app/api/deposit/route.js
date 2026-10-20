@@ -12,13 +12,12 @@ async function ensureDepositCode(redis, user) {
 	if (fullName) {
 		const expectedCode = generateDepositCode(fullName);
 		const compactCode = generateCompactDepositCode(fullName);
-		if (userRecord.depositCode !== expectedCode) {
-			await redis.hset(`user:${user.id}`, "depositCode", expectedCode);
-			await redis.hset("users:by-deposit-code", expectedCode, user.id);
-			await redis.hset("users:by-deposit-code", compactCode, user.id);
-			await redis.hset("users:by-deposit-code", expectedCode.toUpperCase(), user.id);
-			await redis.hset("users:by-deposit-code", fullName, user.id);
-		}
+		await redis.hset(`user:${user.id}`, "depositCode", expectedCode, "fullName", fullName);
+		await redis.hset("users:by-deposit-code", expectedCode, user.id);
+		await redis.hset("users:by-deposit-code", compactCode, user.id);
+		await redis.hset("users:by-deposit-code", expectedCode.toUpperCase(), user.id);
+		await redis.hset("users:by-deposit-code", fullName, user.id);
+		await redis.hset("users:by-fullname", fullName, user.id);
 		return expectedCode;
 	}
 

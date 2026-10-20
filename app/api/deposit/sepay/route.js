@@ -47,6 +47,7 @@ export async function POST(request) {
 	if (!Number.isSafeInteger(amount) || amount < getMinimumDeposit()) return accepted();
 
 	try {
+		console.log(`[SePay Webhook] Received transfer eventId: ${eventId}, amount: ${amount}, content: "${payload?.content || payload?.description || ""}"`);
 		let userId = null;
 		const legacyCode = extractDepositCode(payload);
 		if (legacyCode) {
@@ -55,13 +56,20 @@ export async function POST(request) {
 		if (!userId) {
 			userId = await resolveDepositUserId(payload, redis);
 		}
-		if (typeof userId !== "string" || !userId) return accepted();
+		console.log(`[SePay Webhook] Matched User ID: ${userId}`);
+		if (typeof userId !== "string" || !userId) {
+			console.warn(`[SePay Webhook] No matching user found for content: "${payload?.content || payload?.description || ""}"`);
+			return accepted();
+		}
 
 		const user = await redis.hgetall(`user:${userId}`);
-		if (!user?.id) return accepted();
+		if (!user?.id) {
+			console.warn(`[SePay Webhook] User ID ${userId} does not exist in redis`);
+			return accepted();
+		}
 
 		const transactionId = `sepay:${eventId}`;
-		await redis.eval(
+		const result = await redis.eval(
 			SEPAY_DEPOSIT_SCRIPT,
 			[
 				`user:${userId}`,
@@ -74,8 +82,10 @@ export async function POST(request) {
 			],
 			[amount, transactionId, userId, String(user.username || ""), Date.now(), String(payload.referenceCode || "")],
 		);
+		console.log(`[SePay Webhook] Credited ${amount} VND to ${user.username} (${userId}). Balance result: ${result}`);
 		return accepted();
-	} catch {
+	} catch (err) {
+		console.error("[SePay Webhook] Exception during deposit processing:", err);
 		return Response.json({ success: false, message: "Temporary processing failure" }, { status: 503 });
 	}
 }
